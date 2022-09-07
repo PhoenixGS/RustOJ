@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use chrono::{Local, DateTime, FixedOffset, NaiveDate, prelude::*, offset::LocalResult};
 pub use structs::{config_structs::*, judge_structs::*, user_structs::*, Errors};
-pub use func::{gene_ret, get_tmpdir, one_test};
+pub use func::{gene_ret, get_tmpdir, one_test, id_to_index};
 
 //API
 
@@ -478,10 +478,11 @@ async fn ranklist(index: web::Path<usize>, info: web::Query<Rule>, config: web::
 
     println!("Ranklist!");
     let lock = JUDGE.lock().unwrap();
+
     println!("Ranklist! {:?}", info.scoring_rule);
     let mut has_submitted = vec![];
     for i in 0..users.len() {
-        has_submitted.push(vec![false; config.problems.len()]);
+        has_submitted.push(vec![None; config.problems.len()]);
     }
     for i in 0..lock.len() {
         let id = lock[i].submission.user_id as usize;
@@ -490,14 +491,15 @@ async fn ranklist(index: web::Path<usize>, info: web::Query<Rule>, config: web::
             ScoringRule::latest => {
                 let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
                 vec[id].time = time;
-                ret[id].scores[lock[i].submission.problem_id as usize] = lock[i].score
+                ret[id].scores[id_to_index(lock[i].submission.problem_id, &config).unwrap()] = lock[i].score;
+                has_submitted[id][id_to_index(lock[i].submission.problem_id, &config).unwrap()] = Some(i);
             },
             ScoringRule::highest => {
-                if has_submitted[id][lock[i].submission.problem_id as usize] == false || lock[i].score > ret[id].scores[lock[i].submission.problem_id as usize] {
+                if has_submitted[id][id_to_index(lock[i].submission.problem_id, &config).unwrap()].is_none() || lock[i].score > ret[id].scores[id_to_index(lock[i].submission.problem_id, &config).unwrap()] {
                     let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
                     vec[id].time = time;
-                    ret[id].scores[lock[i].submission.problem_id as usize] = lock[i].score;
-                    has_submitted[id][lock[i].submission.problem_id as usize] = true;
+                    ret[id].scores[id_to_index(lock[i].submission.problem_id, &config).unwrap()] = lock[i].score;
+                    has_submitted[id][id_to_index(lock[i].submission.problem_id, &config).unwrap()] = Some(i);
                 }
             },
         }

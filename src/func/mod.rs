@@ -22,9 +22,9 @@ pub fn gene_ret(res: Result<impl Serialize + std::fmt::Debug, Errors>) -> HttpRe
         Err(Er) => {
             println!("Result: Err {}", Er.to_string());
             HttpResponse::BadRequest().status(StatusCode::from_u16(Er.to_u16()).unwrap()).json(Error{reason: Er.to_string(), code: Er.to_code()})
-            //todo: error
         }
     }
+    //todo: message
 }
 
 pub fn get_tmpdir() -> String {
@@ -120,4 +120,13 @@ pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &Stri
     Command::new("rm")
             .arg(run_path.clone() + ".out").output()?;
     Ok(res.clone())
+}
+
+pub fn id_to_index(id: u64, config: &Config) -> Option<usize> {
+    for i in 0..config.problems.len() {
+        if id == config.problems[i].id {
+            return Some(i);
+        }
+    }
+    None
 }
