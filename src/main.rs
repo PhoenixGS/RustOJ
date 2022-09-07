@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use chrono::{Local, DateTime, FixedOffset, NaiveDate, prelude::*, offset::LocalResult};
 pub use structs::{config_structs::*, judge_structs::*, user_structs::*, Errors};
-pub use func::{gene_ret, get_TMPDIR, one_test};
+pub use func::{gene_ret, get_tmpdir, one_test};
 
 //API
 
@@ -87,7 +87,7 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
         judge.cases.push(CaseResult{id: cnt, result: "Waiting".to_string(), time: 0, memory: 0, info: "".to_string()});
     }
 
-    let TMPDIR = get_TMPDIR();
+    let TMPDIR = get_tmpdir();
 
     println!("mkdir -{}-", TMPDIR);
 
@@ -141,8 +141,8 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
     }
     judge.cases[0].result = "Compilation Success".to_string();
 
-    if prob.misc.is_some() && prob.misc.as_ref().unwrap().packing.is_some() {
-        for pack in prob.misc.as_ref().unwrap().packing.as_ref().unwrap() {
+    if prob.misc.packing.is_some() {
+        for pack in prob.misc.packing.as_ref().unwrap() {
             println!("{:?}", pack);
             let mut ff = true;
             let mut score_sum = 0.0;
@@ -151,7 +151,7 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
                 score_sum += prob.cases[index].score;
                 match ff {
                     true => {
-                        let res = one_test(&prob.cases[index], &run_path, &mut judge.cases[*case_id as usize], &prob.r#type);
+                        let res = one_test(&prob.cases[index], &run_path, &mut judge.cases[*case_id as usize], &prob.r#type, &prob.misc.special_judge);
                         println!("{:?}", res);
                         match res {
                             Ok(ref result) => {
@@ -179,7 +179,7 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
         for cas in &prob.cases {
             println!("!!!{:?}", cas);
             index += 1;
-            let res = one_test(cas, &run_path, &mut judge.cases[index], &prob.r#type);
+            let res = one_test(cas, &run_path, &mut judge.cases[index], &prob.r#type, &prob.misc.special_judge);
             match res {
                 Ok(result) => {
                     if result.result == "Accepted".to_string() {

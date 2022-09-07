@@ -11,6 +11,7 @@ pub mod config_structs {
     #[derive(Serialize, Deserialize, Clone, Debug)]
     pub struct Misc {
         pub packing: Option<Vec<Vec<u64>>>,
+        pub special_judge: Option<Vec<String>>,
         //
     }
 
@@ -28,7 +29,7 @@ pub mod config_structs {
         pub id: u64,
         pub name: String,
         pub r#type: String,
-        pub misc: Option<Misc>,
+        pub misc: Misc,
         pub cases: Vec<Case>,
     }
 

@@ -1,8 +1,8 @@
 use super::structs::{config_structs::*, judge_structs::*, Errors};
-use actix_web::{get, put, middleware::Logger, post, web, App, HttpServer, Responder, HttpRequest, HttpResponse, http::StatusCode};
+use actix_web::{HttpResponse, http::StatusCode};
 use serde::{Serialize, Deserialize};
 use std::process::{Command, Stdio};
-use std::fs::File;
+use std::fs::{self, File};
 use std::time::Duration;
 use wait_timeout::ChildExt;
 use rand::Rng;
@@ -27,7 +27,7 @@ pub fn gene_ret(res: Result<impl Serialize + std::fmt::Debug, Errors>) -> HttpRe
     }
 }
 
-pub fn get_TMPDIR() -> String {
+pub fn get_tmpdir() -> String {
     let mut rng = rand::thread_rng();
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     const len: usize = 5;
@@ -39,7 +39,7 @@ pub fn get_TMPDIR() -> String {
         .collect()
 }
 
-pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &String) -> Result<CaseResult, Errors> {
+pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &String, spj: &Option<Vec<String>>) -> Result<CaseResult, Errors> {
     let in_file = File::open(case.input_file.clone())?;
     let out_file = File::create(run_path.clone() + ".out")?;
     let mut child = Command::new(run_path.clone())
@@ -70,24 +70,51 @@ pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &Stri
         return Ok(res.clone());
     }
     
-    let mut ret;
-    if *typ == "standard".to_string() {
-        ret = Command::new("diff")
-                        .arg("-b")
-                        .arg(case.answer_file.clone())
-                        .arg(run_path.clone() + ".out")
-                        .status().unwrap();
-        //?
-    } else {
-        ret = Command::new("diff")
-                        .arg(case.answer_file.clone())
-                        .arg(run_path.clone() + ".out")
-                        .status().unwrap();
-    }
-    if ret.success() {
-        res.result = "Accepted".to_string();
-    } else {
-        res.result = "Wrong Answer".to_string();
+    match spj {
+        Some(comm_c) => {
+            let mut comm = comm_c.clone();
+            for st in &mut comm {
+                if *st == "%OUTPUT%".to_string() {
+                    *st = run_path.clone() + ".out"
+                }
+                if *st == "%ANSWER%".to_string() {
+                    *st = case.answer_file.clone();
+                }
+            }
+            let spj_file = File::create(run_path.clone() + ".spj")?;
+            let ret = Command::new(&comm[0])
+                    .args(&comm[1..])
+                    .stdout(Stdio::from(spj_file))
+                    .status()?;
+            let info = fs::read_to_string(run_path.clone() + ".spj")?;
+            let infos:Vec<&str> = info.split('\n').collect();
+            if infos.len() < 2 {
+                return Err(Errors::ErrInternal);
+            }
+            res.result = infos[0].to_string();
+            res.info = infos[1].to_string();
+        },
+        None => {
+            let mut ret;
+            if *typ == "standard".to_string() {
+                ret = Command::new("diff")
+                                .arg("-b")
+                                .arg(case.answer_file.clone())
+                                .arg(run_path.clone() + ".out")
+                                .status().unwrap();
+                //?
+            } else {
+                ret = Command::new("diff")
+                                .arg(case.answer_file.clone())
+                                .arg(run_path.clone() + ".out")
+                                .status().unwrap();
+            }
+            if ret.success() {
+                res.result = "Accepted".to_string();
+            } else {
+                res.result = "Wrong Answer".to_string();
+            }
+        }
     }
     println!("{}", res.result);
     Command::new("rm")
