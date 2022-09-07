@@ -121,12 +121,3 @@ pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &Stri
             .arg(run_path.clone() + ".out").output()?;
     Ok(res.clone())
 }
-
-pub fn id_to_index(id: u64, config: &Config) -> Option<usize> {
-    for i in 0..config.problems.len() {
-        if id == config.problems[i].id {
-            return Some(i);
-        }
-    }
-    None
-}

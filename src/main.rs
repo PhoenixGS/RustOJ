@@ -15,8 +15,8 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use chrono::{Local, DateTime, FixedOffset, NaiveDate, prelude::*, offset::LocalResult};
-pub use structs::{config_structs::*, judge_structs::*, user_structs::*, Errors};
-pub use func::{gene_ret, get_tmpdir, one_test, id_to_index};
+pub use structs::{config_structs::*, judge_structs::*, user_structs::*, contest_structs::*, Errors};
+pub use func::{gene_ret, get_tmpdir, one_test};
 
 //API
 
@@ -38,6 +38,7 @@ async fn exit() -> impl Responder {
 lazy_static! {
     static ref JUDGE: Arc<Mutex<Vec<Judge>>> = Arc::new(Mutex::new(Vec::new()));
     static ref USER: Arc<Mutex<Vec<User>>> = Arc::new(Mutex::new(Vec::new()));
+    static ref CONTEST: Arc<Mutex<Vec<Contest>>> = Arc::new(Mutex::new(Vec::new()));
 }
 
 fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
@@ -215,6 +216,10 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
 async fn post_jobs(body: web::Json<Submission>, config: web::Data<Config>) -> impl Responder {
     log::info!("post_jobs");
 
+    let mut lock = JUDGE.lock().unwrap();
+
+    let now = Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
     //Check language
     let mut lang_c: Option<Language> = None;
     for language in &config.languages {
@@ -233,7 +238,52 @@ async fn post_jobs(body: web::Json<Submission>, config: web::Data<Config>) -> im
     }
     drop(users);
 
-    //todo: contest id
+    //Check contest id
+    if body.contest_id != 0 {
+        let mut contests = CONTEST.lock().unwrap();
+        if body.contest_id >= contests.len() as u64 {
+            return gene_ret(Err::<Judge, Errors>(Errors::ErrNotFound));
+        }
+        
+        //Check problem_id & user_id
+        let mut ff = false;
+        for index in &contests[body.contest_id as usize].problem_ids {
+            if *index == body.problem_id {
+                ff = true;
+            }
+        }
+        if ff == false {
+            return gene_ret(Err::<Judge, Errors>(Errors::ErrInvalidArgument));
+        }
+        ff = false;
+        for id in &contests[body.contest_id as usize].user_ids {
+            if *id == body.user_id {
+                ff = true;
+            }
+        }
+        if ff == false {
+            return gene_ret(Err::<Judge, Errors>(Errors::ErrInvalidArgument));
+        }
+
+        //Check date & time
+        if Local.datetime_from_str(&now, "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() < Local.datetime_from_str(&contests[body.contest_id as usize].from, "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() {
+            return gene_ret(Err::<Judge, Errors>(Errors::ErrInvalidArgument));
+        }
+        if Local.datetime_from_str(&now, "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() > Local.datetime_from_str(&contests[body.contest_id as usize].to, "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() {
+            return gene_ret(Err::<Judge, Errors>(Errors::ErrInvalidArgument));
+        }
+
+        //Check submission limit
+        let mut count = 0;
+        for i in 0..lock.len() {
+            if lock[i].submission.contest_id == body.contest_id && lock[i].submission.user_id == body.user_id {
+                count += 1;
+            }
+        }
+        if count >= contests[body.contest_id as usize].submission_limit {
+            return gene_ret(Err::<Judge, Errors>(Errors::ErrRateLimit));
+        }
+    }
 
     //Check problem
     let mut prob_c: Option<Problem> = None;
@@ -247,9 +297,7 @@ async fn post_jobs(body: web::Json<Submission>, config: web::Data<Config>) -> im
     }
     
     //Init result
-    let mut lock = JUDGE.lock().unwrap();
     println!("LEN!{}", lock.len());
-    let now = Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     let id = lock.len();
     let mut judge = Judge{id, created_time: now.clone(), updated_time: now.clone(), submission: body.clone(), state: "Queueing".to_string(), result: "Waiting".to_string(), score: 0.0, cases: vec![]};
     lock.push(judge.clone());
@@ -291,7 +339,11 @@ async fn get_jobs(info: web::Query<AskJob>, config: web::Data<Config>) -> impl R
                 ff = false;
             }
         }
-        //todo: contest_id
+        if info.contest_id.is_some() {
+            if judge.submission.contest_id != info.contest_id.unwrap() {
+                ff = false;
+            }
+        }
         if info.problem_id.is_some() {
             if judge.submission.problem_id != info.problem_id.unwrap() {
                 ff = false;
@@ -418,8 +470,59 @@ struct Rule {
     tie_breaker: Option<TieBreaker>,
 }
 
+
+#[post("/contests")]
+async fn post_contests(mut body: web::Json<Contest>, config: web::Data<Config>) -> impl Responder {
+    let mut contests = CONTEST.lock().unwrap();
+    let mut users = USER.lock().unwrap();
+    match body.id {
+        Some(id) => {
+            if id as usize >= contests.len() {
+                return gene_ret(Err::<Contest, Errors>(Errors::ErrNotFound));
+            }
+            contests[id as usize] = body.clone();
+            return gene_ret(Ok(body.clone()));
+        },
+        None => {
+            for i in &body.problem_ids {
+                if config.to_index(*i).is_none() {
+                    return gene_ret(Err::<Contest, Errors>(Errors::ErrNotFound));
+                }
+            }
+            for i in &body.user_ids {
+                if *i as usize >= users.len() {
+                    return gene_ret(Err::<Contest, Errors>(Errors::ErrNotFound));
+                }
+            }
+            body.id = Some(contests.len() as u64);
+            contests.push(body.clone());
+            return gene_ret(Ok(body.clone()));
+        },
+    }
+}
+
+#[get("/contests")]
+async fn get_contests(config: web::Data<Config>) -> impl Responder {
+    let mut contests = CONTEST.lock().unwrap();
+    let mut res = vec![];
+    for i in 1..contests.len() {
+        res.push(contests[i].clone());
+    }
+    gene_ret(Ok(res))
+}
+
+#[get("/contests/{index}")]
+async fn get_contests_id(index: web::Path<usize>, info: web::Query<Rule>, config: web::Data<Config>) -> impl Responder {
+    let mut contests = CONTEST.lock().unwrap();
+    if *index <= 0 || *index >= contests.len() {
+        return gene_ret(Err::<Contest, Errors>(Errors::ErrNotFound));
+    }
+    gene_ret(Ok(contests[*index].clone()))
+}
+
 #[get("/contests/{index}/ranklist")]
 async fn ranklist(index: web::Path<usize>, info: web::Query<Rule>, config: web::Data<Config>) -> impl Responder {
+    #[derive(Clone, Debug)]
     struct Rec {
         id: u64,
         time: DateTime<Local>,
@@ -465,6 +568,11 @@ async fn ranklist(index: web::Path<usize>, info: web::Query<Rule>, config: web::
         None => rule = ScoringRule::latest,
     }
 
+    let mut contests = CONTEST.lock().unwrap();
+    if *index >= contests.len() {
+        return gene_ret(Err::<Vec<Ret>, Errors>(Errors::ErrNotFound));
+    }
+
     let mut users = USER.lock().unwrap();
     let mut vec:Vec<Rec> = vec![];
     for i in 0..users.len() {
@@ -473,62 +581,80 @@ async fn ranklist(index: web::Path<usize>, info: web::Query<Rule>, config: web::
 
     let mut ret = vec![];
     for i in 0..users.len() {
-        ret.push(Ret{user: users[i].clone(), rank: 0, scores: vec![0.0; config.problems.len()]});
+        ret.push(Ret{user: users[i].clone(), rank: 0, scores: vec![0.0; contests[*index].problem_ids.len()]});
     }
 
-    println!("Ranklist!");
+    println!("Ranklist! {:?} {:?}", contests[*index].user_ids, contests[*index].problem_ids);
     let lock = JUDGE.lock().unwrap();
 
     println!("Ranklist! {:?}", info.scoring_rule);
     let mut has_submitted = vec![];
     for i in 0..users.len() {
-        has_submitted.push(vec![None; config.problems.len()]);
+        has_submitted.push(vec![None; contests[*index].problem_ids.len()]);
     }
     for i in 0..lock.len() {
-        let id = lock[i].submission.user_id as usize;
-        vec[id].count += 1;
-        match &rule {
-            ScoringRule::latest => {
-                let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
-                vec[id].time = time;
-                ret[id].scores[id_to_index(lock[i].submission.problem_id, &config).unwrap()] = lock[i].score;
-                has_submitted[id][id_to_index(lock[i].submission.problem_id, &config).unwrap()] = Some(i);
-            },
-            ScoringRule::highest => {
-                if has_submitted[id][id_to_index(lock[i].submission.problem_id, &config).unwrap()].is_none() || lock[i].score > ret[id].scores[id_to_index(lock[i].submission.problem_id, &config).unwrap()] {
+        if lock[i].submission.contest_id as usize == *index {
+            let id = lock[i].submission.user_id as usize;
+            //let index = config.to_index(lock[i].submission.problem_id).unwrap();
+            let index = contests[*index].to_index(lock[i].submission.problem_id).unwrap();
+            println!("!!{}", index);
+            vec[id].count += 1;
+            match &rule {
+                ScoringRule::latest => {
                     let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
                     vec[id].time = time;
-                    ret[id].scores[id_to_index(lock[i].submission.problem_id, &config).unwrap()] = lock[i].score;
-                    has_submitted[id][id_to_index(lock[i].submission.problem_id, &config).unwrap()] = Some(i);
-                }
-            },
+                    ret[id].scores[index] = lock[i].score;
+                    has_submitted[id][index] = Some(i);
+                },
+                ScoringRule::highest => {
+                    if has_submitted[id][index].is_none() || lock[i].score > ret[id].scores[index] {
+                        let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
+                        vec[id].time = time;
+                        ret[id].scores[index] = lock[i].score;
+                        has_submitted[id][index] = Some(i);
+                    }
+                },
+            }
         }
     }
 
     println!("{:?}", ret);
 
     for i in 0..users.len() {
-        for j in 0..config.problems.len() {
+        for j in 0..contests[*index].problem_ids.len() {
             vec[i].score += ret[i].scores[j];
         }
     }
 
-    for i in 0..users.len() {
-        println!("{}:{}", i, vec[i].score);
+    let mut valid = vec![];
+    if *index == 0 {
+        for i in 0..users.len() {
+            valid.push(vec[i].clone());
+        }
+    } else {
+        for i in &contests[*index].user_ids {
+            println!("{} {:?}", i, vec[*i as usize]);
+            valid.push(vec[*i as usize].clone());
+        }
     }
-    vec.sort_by(|x, y| x.cmp(y, &info.tie_breaker));
 
-    ret[vec[0].id as usize].rank = 1;
-    for i in 1..users.len() {
-        if vec[i - 1].cmp0(&vec[i], &info.tie_breaker) != Ordering::Equal {
-            ret[vec[i].id as usize].rank = i as u64 + 1;
+    /*for i in 0..users.len() {
+        println!("{}:{}", i, vec[i].score);
+    }*/
+
+    valid.sort_by(|x, y| x.cmp(y, &info.tie_breaker));
+
+    ret[valid[0].id as usize].rank = 1;
+    for i in 1..valid.len() {
+        if valid[i - 1].cmp0(&valid[i], &info.tie_breaker) != Ordering::Equal {
+            ret[valid[i].id as usize].rank = i as u64 + 1;
         } else {
-            ret[vec[i].id as usize].rank = ret[vec[i - 1].id as usize].rank;
+            ret[valid[i].id as usize].rank = ret[valid[i - 1].id as usize].rank;
         }
     }
     let mut result = vec![];
-    for i in 0..users.len() {
-        result.push(ret[vec[i].id as usize].clone());
+    for i in 0..valid.len() {
+        result.push(ret[valid[i].id as usize].clone());
     }
     gene_ret(Ok(result))
 }
@@ -576,6 +702,13 @@ async fn main() -> std::io::Result<()> {
     users.push(User{id: 0, name: "root".to_string()});
     drop(users);
 
+    let mut contests = CONTEST.lock().unwrap();
+    contests.push(Contest{id: Some(0), from: "".to_string(), to: "".to_string(), name: "".to_string(), problem_ids: vec![], user_ids: vec![], submission_limit: 0});
+    for i in 0..config.problems.len() {
+        contests[0].problem_ids.push(i as u64);
+    }
+    drop(contests);
+
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
     HttpServer::new(move || {
@@ -590,6 +723,9 @@ async fn main() -> std::io::Result<()> {
             .service(put_jobs_id)
             .service(post_users)
             .service(get_users)
+            .service(post_contests)
+            .service(get_contests)
+            .service(get_contests_id)
             .service(ranklist)
             // DO NOT REMOVE: used in automatic testing
             .service(exit)

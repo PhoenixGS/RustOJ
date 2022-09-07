@@ -12,6 +12,7 @@ pub mod config_structs {
     pub struct Misc {
         pub packing: Option<Vec<Vec<u64>>>,
         pub special_judge: Option<Vec<String>>,
+        pub dynamic_ranking_ratio: Option<f64>,
         //
     }
 
@@ -45,6 +46,17 @@ pub mod config_structs {
         pub server: Server,
         pub problems: Vec<Problem>,
         pub languages: Vec<Language>,
+    }
+    
+    impl Config {
+        pub fn to_index(&self, id: u64) -> Option<usize> {
+            for i in 0..self.problems.len() {
+                if id == self.problems[i].id {
+                    return Some(i);
+                }
+            }
+            None
+        }
     }
 }
 
@@ -89,6 +101,32 @@ pub mod user_structs {
     pub struct User {
         pub id: u64,
         pub name: String,
+    }
+}
+
+pub mod contest_structs {
+    use serde::{Serialize, Deserialize};
+
+    #[derive(Serialize, Deserialize, Clone, Debug)]
+    pub struct Contest {
+        pub id: Option<u64>,
+        pub name: String,
+        pub from: String,
+        pub to: String,
+        pub problem_ids: Vec<u64>,
+        pub user_ids: Vec<u64>,
+        pub submission_limit: u64,
+    }
+
+    impl Contest {
+        pub fn to_index(&self, id: u64) -> Option<usize> {
+            for i in 0..self.problem_ids.len() {
+                if id == self.problem_ids[i] {
+                    return Some(i);
+                }
+            }
+            None
+        }
     }
 }
 
