@@ -5,14 +5,14 @@ use log;
 //use core::lazy;
 use std::{path::PathBuf, i64::MAX};
 use structopt::StructOpt;
-use std::{fs::{self, File}, io::{self, Write}, vec, mem::swap};
+use std::{fs::{self, File}, io::{self, Write}, vec, mem::swap, cmp::Ordering};
 use std::process::{Command, Stdio};
 use rand::Rng;
 use wait_timeout::ChildExt;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
-use chrono::{Local, DateTime};
+use chrono::{Local, DateTime, FixedOffset, NaiveDate, prelude::*, offset::LocalResult};
 
 //Config
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -442,7 +442,7 @@ async fn post_jobs(body: web::Json<Submission>, config: web::Data<Config>) -> im
     //Init result
     let mut lock = JUDGE.lock().unwrap();
     println!("LEN!{}", lock.len());
-    let now = Local::now().format("%Y-%m-%dT%H:%M:%S.000Z").to_string();
+    let now = Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     let id = lock.len();
     let mut judge = Judge{id, created_time: now.clone(), updated_time: now.clone(), submission: body.clone(), state: "Queueing".to_string(), result: "Waiting".to_string(), score: 0.0, cases: vec![]};
     lock.push(judge.clone());
@@ -497,12 +497,12 @@ async fn get_jobs(info: web::Query<AskJob>, config: web::Data<Config>) -> impl R
             }
         }
         if info.from.is_some() {
-            if DateTime::parse_from_str(judge.created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() < DateTime::parse_from_str(info.from.as_ref().unwrap().as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() {
+            if Local.datetime_from_str(judge.created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() < Local.datetime_from_str(info.from.as_ref().unwrap().as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() {
                 ff = false;
             }
         }
         if info.to.is_some() {
-            if DateTime::parse_from_str(judge.created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() > DateTime::parse_from_str(info.to.as_ref().unwrap().as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() {
+            if Local.datetime_from_str(judge.created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() > Local.datetime_from_str(info.to.as_ref().unwrap().as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() {
                 ff = false;
             }
         }
@@ -593,6 +593,145 @@ async fn get_users(config: web::Data<Config>) -> impl Responder {
     gene_ret(Ok(res))
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+enum ScoringRule {
+    latest,
+    highest,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+enum TieBreaker {
+    submission_time,
+    submission_count,
+    user_id,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct Rule {
+    scoring_rule: Option<ScoringRule>,
+    tie_breaker: Option<TieBreaker>,
+}
+
+#[get("/contests/{index}/ranklist")]
+async fn ranklist(index: web::Path<usize>, info: web::Query<Rule>, config: web::Data<Config>) -> impl Responder {
+    struct Rec {
+        id: u64,
+        time: DateTime<Local>,
+        count: u64,
+        score: f64,
+    }
+
+    impl Rec {
+        fn cmp0(&self, other: &Rec, ty: &Option<TieBreaker>) -> Ordering {
+            match self.score.partial_cmp(&other.score) {
+                Some(Ordering::Equal) => {
+                    match ty {
+                        Some(TieBreaker::submission_time) => self.time.partial_cmp(&other.time).unwrap(),
+                        Some(TieBreaker::submission_count) => self.count.partial_cmp(&other.count).unwrap(),
+                        Some(TieBreaker::user_id) => self.id.partial_cmp(&other.id).unwrap(),
+                        _ => Ordering::Equal,
+                    }
+                },
+                _ => other.score.partial_cmp(&self.score).unwrap(),
+            }
+        }
+
+        fn cmp(&self, other: &Rec, ty: &Option<TieBreaker>) -> Ordering {
+            let t = Self::cmp0(&self, other, ty);
+            match t {
+                Ordering::Equal => self.id.partial_cmp(&other.id).unwrap(),
+                _ => t
+            }
+        }
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug)]
+    struct Ret {
+        user: User,
+        rank: u64,
+        scores: Vec<f64>,
+    }
+
+    println!("Ranklist!");
+    let rule;
+    match &info.scoring_rule {
+        Some(r) => rule = (*r).clone(),
+        None => rule = ScoringRule::latest,
+    }
+
+    let mut users = USER.lock().unwrap();
+    let mut vec:Vec<Rec> = vec![];
+    for i in 0..users.len() {
+        vec.push(Rec{id: i as u64, time: Local.ymd(9999, 12, 31).and_hms(23, 59, 59), count: 0, score: 0.0});
+    }
+
+    let mut ret = vec![];
+    for i in 0..users.len() {
+        ret.push(Ret{user: users[i].clone(), rank: 0, scores: vec![0.0; config.problems.len()]});
+    }
+
+    println!("Ranklist!");
+    let lock = JUDGE.lock().unwrap();
+    println!("Ranklist! {:?}", info.scoring_rule);
+    let mut has_submitted = vec![];
+    for i in 0..users.len() {
+        has_submitted.push(vec![false; config.problems.len()]);
+    }
+    for i in 0..lock.len() {
+        let id = lock[i].submission.user_id as usize;
+        vec[id].count += 1;
+        match &rule {
+            ScoringRule::latest => {
+                let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
+                vec[id].time = time;
+                ret[id].scores[lock[i].submission.problem_id as usize] = lock[i].score
+            },
+            ScoringRule::highest => {
+                println!("X{} {} {} {}", id, lock[i].submission.problem_id, lock[i].score, ret[id].scores[lock[i].submission.problem_id as usize]);
+                if has_submitted[id][lock[i].submission.problem_id as usize] == false || lock[i].score > ret[id].scores[lock[i].submission.problem_id as usize] {
+                    let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
+                    vec[id].time = time;
+                    ret[id].scores[lock[i].submission.problem_id as usize] = lock[i].score;
+                    has_submitted[id][lock[i].submission.problem_id as usize] = true;
+                }
+                println!("Y{} {} {} {}", id, lock[i].submission.problem_id, lock[i].score, ret[id].scores[lock[i].submission.problem_id as usize]);
+            },
+        }
+    }
+
+    println!("{:?}", ret);
+
+    for i in 0..users.len() {
+        for j in 0..config.problems.len() {
+            vec[i].score += ret[i].scores[j];
+        }
+    }
+
+    for i in 0..users.len() {
+        println!("{}:{}", i, vec[i].score);
+    }
+    if users.len() == 3 {
+        println!("Ranklist!{:?} -- {:?} --  {:?}", vec[0].time, vec[1].time, vec[2].time);
+        println!("{:?} {:?} {:?} ", vec[0].cmp(&vec[1], &info.tie_breaker), vec[0].cmp(&vec[2], &info.tie_breaker), vec[1].cmp(&vec[2], &info.tie_breaker));
+    }
+    vec.sort_by(|x, y| x.cmp(y, &info.tie_breaker));
+
+    ret[vec[0].id as usize].rank = 1;
+    for i in 1..users.len() {
+        if vec[i - 1].cmp0(&vec[i], &info.tie_breaker) != Ordering::Equal {
+            ret[vec[i].id as usize].rank = i as u64 + 1;
+        } else {
+            ret[vec[i].id as usize].rank = ret[vec[i - 1].id as usize].rank;
+        }
+    }
+    let mut result = vec![];
+    for i in 0..users.len() {
+        result.push(ret[vec[i].id as usize].clone());
+    }
+    gene_ret(Ok(result))
+}
+
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let opt = Opt::from_args();
@@ -637,6 +776,7 @@ async fn main() -> std::io::Result<()> {
             .service(put_jobs_id)
             .service(post_users)
             .service(get_users)
+            .service(ranklist)
             // DO NOT REMOVE: used in automatic testing
             .service(exit)
     })
