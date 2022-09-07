@@ -1,3 +1,5 @@
+mod structs;
+
 use actix_web::{get, put, middleware::Logger, post, web, App, HttpServer, Responder, HttpRequest, HttpResponse, http::StatusCode};
 use serde::{Serialize, Deserialize};
 use env_logger;
@@ -13,50 +15,7 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use chrono::{Local, DateTime, FixedOffset, NaiveDate, prelude::*, offset::LocalResult};
-
-//Config
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Server {
-    bind_address: Option<String>,
-    bind_port: Option<u16>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Misc {
-    //
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Case {
-    score: f64,
-    input_file: String,
-    answer_file: String,
-    time_limit: u64,
-    memory_limit: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Problem {
-    id: u64,
-    name: String,
-    r#type: String,
-    misc: Option<Misc>,
-    cases: Vec<Case>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Language {
-    name: String,
-    file_name: String,
-    command: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Config {
-    server: Server,
-    problems: Vec<Problem>,
-    languages: Vec<Language>,
-}
+pub use structs::{config_structs::*, judge_structs::*};
 
 //Arguments
 #[derive(Debug, StructOpt)]
@@ -100,35 +59,6 @@ async fn exit() -> impl Responder {
     format!("Exited")
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Submission {
-    source_code: String,
-    language: String,
-    user_id: u64,
-    contest_id: u64,
-    problem_id: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct CaseResult {
-    id: u64,
-    result: String,
-    time: u64,
-    memory: u64,
-    info: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Judge {
-    id: usize,
-    created_time: String,
-    updated_time: String,
-    submission: Submission,
-    state: String,
-    result: String,
-    score: f64,
-    cases: Vec<CaseResult>,
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct Error {
