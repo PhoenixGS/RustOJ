@@ -10,6 +10,7 @@ pub mod config_structs {
 
     #[derive(Serialize, Deserialize, Clone, Debug)]
     pub struct Misc {
+        pub packing: Option<Vec<Vec<u64>>>,
         //
     }
 
@@ -77,6 +78,16 @@ pub mod judge_structs {
         pub result: String,
         pub score: f64,
         pub cases: Vec<CaseResult>,
+    }
+}
+
+pub mod user_structs {
+    use serde::{Serialize, Deserialize};
+
+    #[derive(Serialize, Deserialize, Clone, Debug)]
+    pub struct User {
+        pub id: u64,
+        pub name: String,
     }
 }
 

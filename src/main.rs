@@ -1,4 +1,5 @@
 mod structs;
+mod func;
 
 use actix_web::{get, put, middleware::Logger, post, web, App, HttpServer, Responder, HttpRequest, HttpResponse, http::StatusCode};
 use serde::{Serialize, Deserialize};
@@ -9,13 +10,13 @@ use std::{path::PathBuf, i64::MAX};
 use structopt::StructOpt;
 use std::{fs::{self, File}, io::{self, Write}, vec, mem::swap, cmp::Ordering};
 use std::process::{Command, Stdio};
-use rand::Rng;
 use wait_timeout::ChildExt;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use chrono::{Local, DateTime, FixedOffset, NaiveDate, prelude::*, offset::LocalResult};
-pub use structs::{config_structs::*, judge_structs::*, Errors};
+pub use structs::{config_structs::*, judge_structs::*, user_structs::*, Errors};
+pub use func::{gene_ret, get_TMPDIR, one_test};
 
 //Arguments
 #[derive(Debug, StructOpt)]
@@ -28,18 +29,6 @@ struct Opt {
     //Set flush
     #[structopt(short = "f", long = "flush-data")]
     flush: bool,
-}
-
-fn get_TMPDIR() -> String {
-    let mut rng = rand::thread_rng();
-    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    const len: usize = 5;
-    (0..len)
-    .map(|_| {
-        let idx = rng.gen_range(0..CHARSET.len());
-        CHARSET[idx] as char
-        })
-        .collect()
 }
 
 //API
@@ -59,36 +48,9 @@ async fn exit() -> impl Responder {
     format!("Exited")
 }
 
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct Error {
-    reason: String,
-    code: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct User {
-    id: u64,
-    name: String,
-}
-
 lazy_static! {
     static ref JUDGE: Arc<Mutex<Vec<Judge>>> = Arc::new(Mutex::new(Vec::new()));
     static ref USER: Arc<Mutex<Vec<User>>> = Arc::new(Mutex::new(Vec::new()));
-}
-
-fn gene_ret(res: Result<impl Serialize + std::fmt::Debug, Errors>) -> HttpResponse {
-    match res {
-        Ok(json) => {
-            println!("Result: Ok {:?}", json);
-            HttpResponse::Ok().json(json)
-        },
-        Err(Er) => {
-            println!("Result: Err {}", Er.to_string());
-            HttpResponse::BadRequest().status(StatusCode::from_u16(Er.to_u16()).unwrap()).json(Error{reason: Er.to_string(), code: Er.to_code()})
-            //todo: error
-        }
-    }
 }
 
 fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
@@ -98,11 +60,7 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
     }
     let judge = &mut lock[id];
     println!("start judging");
-    //println!("{:?}", submission);
-    //println!("{:?}", lang);
-    //println!("{:?}", prob);
-
-
+    
     //Get language
     let mut lang_c: Option<Language> = None;
     let mut lang: Language;
@@ -200,75 +158,17 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
     for cas in &prob.cases {
         println!("!!!{:?}", cas);
         index += 1;
-        println!("in/out -{}- -{}-", cas.input_file.clone(), run_path.clone() + ".out");
-        let in_file = File::open(cas.input_file.clone())?;
-        println!("open in");
-        let out_file = File::create(run_path.clone() + ".out")?;
-        println!("open out");
-        let mut child = Command::new(run_path.clone())
-                .stdin(Stdio::from(in_file))
-                .stdout(Stdio::from(out_file))
-                .stderr(Stdio::null())
-                .spawn().unwrap();
-
-        //todo: Memory limit
-
-        //Time limit
-        let mut time_l = false;
-        let mut limit = cas.time_limit;
-        if limit == 0 {
-            limit = std::u64::MAX;
-        }
-        let time_limit = Duration::from_micros(cas.time_limit);
-        let status_code = match child.wait_timeout(time_limit).unwrap() {
-            Some(status) => {println!("Status {} {}", status.success(), status.code().unwrap());status.code()},
-            None => {
-                time_l = true;
-                judge.cases[index].result = "Time Limit Exceeded".to_string();
-                if judge.result == "Waiting".to_string() {
-                    judge.result = "Time Limit Exceeded".to_string();
+        let res = one_test(cas, &run_path, &mut judge.cases[index], &prob.r#type);
+        match res {
+            Ok(result) => {
+                if result.result == "Accepted".to_string() {
+                    judge.score += cas.score;
+                } else {
+                    judge.result = result.result.clone();
                 }
-                child.kill().unwrap();
-                child.wait().unwrap().code()
-            }
-        };
-        if time_l {
-            continue;
+            },
+            Err(error) => return Err(error),
         }
-        if status_code.unwrap() != 0 {
-            judge.cases[index].result = "Runtime Error".to_string();
-            if judge.result == "Waiting".to_string() {
-                judge.result = "Runtime Error".to_string();
-            }
-            println!("ERRRRRRRRR");
-            continue;
-        }
-        
-        let mut ret;
-        if prob.r#type.clone() == "standard".to_string() {
-            ret = Command::new("diff")
-                          .arg("-b")
-                          .arg(cas.answer_file.clone())
-                          .arg(run_path.clone() + ".out")
-                          .status().unwrap();
-            //?
-        } else {
-            ret = Command::new("diff")
-                          .arg(cas.answer_file.clone())
-                          .arg(run_path.clone() + ".out")
-                          .status().unwrap()
-        }
-        if ret.success() {
-            judge.cases[index].result = "Accepted".to_string();
-            judge.score += cas.score;
-        } else {
-            judge.cases[index].result = "Wrong Answer".to_string();
-            if judge.result == "Waiting".to_string() {
-                judge.result = "Wrong Answer".to_string();
-            }
-        }
-        Command::new("rm")
-                .arg(run_path.clone() + ".out").output()?;
     }
     let now = Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     judge.updated_time = now.clone();
