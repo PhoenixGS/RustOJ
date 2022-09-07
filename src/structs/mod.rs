@@ -34,6 +34,16 @@ pub mod config_structs {
         pub cases: Vec<Case>,
     }
 
+    impl Problem {
+        pub fn score_sum(&self) -> f64 {
+            let mut res = 0.0;
+            for case in &self.cases {
+                res += case.score;
+            }
+            res
+        }
+    }
+
     #[derive(Serialize, Deserialize, Clone, Debug)]
     pub struct Language {
         pub name: String,
@@ -76,7 +86,7 @@ pub mod judge_structs {
     pub struct CaseResult {
         pub id: u64,
         pub result: String,
-        pub time: u64,
+        pub time: u128,
         pub memory: u64,
         pub info: String,
     }

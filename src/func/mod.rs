@@ -3,7 +3,7 @@ use actix_web::{HttpResponse, http::StatusCode};
 use serde::{Serialize, Deserialize};
 use std::process::{Command, Stdio};
 use std::fs::{self, File};
-use std::time::Duration;
+use std::time::{Instant, Duration};
 use wait_timeout::ChildExt;
 use rand::Rng;
 
@@ -55,16 +55,29 @@ pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &Stri
     if limit == 0 {
         limit = std::u64::MAX;
     }
+    let instant = Instant::now();
     let time_limit = Duration::from_micros(case.time_limit);
     let status_code = match child.wait_timeout(time_limit).unwrap() {
-        Some(status) => {println!("Status {} {}", status.success(), status.code().unwrap());status.code()},
+        Some(status) => {
+            //println!("Status {} {}", status.success(), status.code().unwrap());
+            status.code()
+        },
         None => {
-            res.result = "Time Limit Exceeded".to_string();
             child.kill().unwrap();
-            child.wait().unwrap().code();
-            return Ok(res.clone());
+            child.wait().unwrap().code()
+            //return Ok(res.clone());
         }
     };
+    let running_time = instant.elapsed();
+    res.time = running_time.as_millis();
+    println!("TIME1!!!! {:?}", res.time);
+
+    if running_time.as_micros() > case.time_limit as u128 {
+        res.result = "Time Limit Exceeded".to_string();
+        return Ok(res.clone());
+    }
+    println!("TIME2!!!! {:?}", res.time);
+
     if status_code.unwrap() != 0 {
         res.result = "Runtime Error".to_string();
         return Ok(res.clone());
@@ -96,7 +109,7 @@ pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &Stri
         },
         None => {
             let mut ret;
-            if *typ == "standard".to_string() {
+            if *typ == "standard".to_string() || *typ == "dynamic_ranking" {
                 ret = Command::new("diff")
                                 .arg("-b")
                                 .arg(case.answer_file.clone())
