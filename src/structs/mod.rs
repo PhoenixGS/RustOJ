@@ -91,6 +91,7 @@ pub mod user_structs {
     }
 }
 
+#[derive(Debug)]
 pub enum Errors {
     ErrInvalidArgument,
     ErrInvalidState,

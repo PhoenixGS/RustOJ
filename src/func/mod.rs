@@ -82,13 +82,14 @@ pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &Stri
         ret = Command::new("diff")
                         .arg(case.answer_file.clone())
                         .arg(run_path.clone() + ".out")
-                        .status().unwrap()
+                        .status().unwrap();
     }
     if ret.success() {
         res.result = "Accepted".to_string();
     } else {
         res.result = "Wrong Answer".to_string();
     }
+    println!("{}", res.result);
     Command::new("rm")
             .arg(run_path.clone() + ".out").output()?;
     Ok(res.clone())

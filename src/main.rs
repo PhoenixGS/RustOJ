@@ -18,19 +18,6 @@ use chrono::{Local, DateTime, FixedOffset, NaiveDate, prelude::*, offset::LocalR
 pub use structs::{config_structs::*, judge_structs::*, user_structs::*, Errors};
 pub use func::{gene_ret, get_TMPDIR, one_test};
 
-//Arguments
-#[derive(Debug, StructOpt)]
-#[structopt(name = "example", about = "An example of StructOpt usage.")]
-struct Opt {
-    //Set config
-    #[structopt(short = "c", long = "config", default_value = "")]
-    config: String,
-
-    //Set flush
-    #[structopt(short = "f", long = "flush-data")]
-    flush: bool,
-}
-
 //API
 
 #[get("/hello/{name}")]
@@ -154,22 +141,62 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
     }
     judge.cases[0].result = "Compilation Success".to_string();
 
-    let mut index:usize = 0;
-    for cas in &prob.cases {
-        println!("!!!{:?}", cas);
-        index += 1;
-        let res = one_test(cas, &run_path, &mut judge.cases[index], &prob.r#type);
-        match res {
-            Ok(result) => {
-                if result.result == "Accepted".to_string() {
-                    judge.score += cas.score;
-                } else {
-                    judge.result = result.result.clone();
+    if prob.misc.is_some() && prob.misc.as_ref().unwrap().packing.is_some() {
+        for pack in prob.misc.as_ref().unwrap().packing.as_ref().unwrap() {
+            println!("{:?}", pack);
+            let mut ff = true;
+            let mut score_sum = 0.0;
+            for case_id in pack {
+                let index = *case_id as usize - 1;
+                score_sum += prob.cases[index].score;
+                match ff {
+                    true => {
+                        let res = one_test(&prob.cases[index], &run_path, &mut judge.cases[*case_id as usize], &prob.r#type);
+                        println!("{:?}", res);
+                        match res {
+                            Ok(ref result) => {
+                                if result.result != "Accepted".to_string() {
+                                    ff = false;
+                                    if judge.result == "Waiting".to_string() {
+                                        judge.result = result.result.clone();
+                                    }
+                                }
+                            },
+                            Err(error) => return Err(error),
+                        }
+                        println!("{:?}", res);
+
+                    }
+                    false => judge.cases[*case_id as usize].result = "Skipped".to_string(),
                 }
-            },
-            Err(error) => return Err(error),
+            }
+            if ff == true {
+                judge.score += score_sum;
+            }
+        }
+    } else {
+        let mut index:usize = 0;
+        for cas in &prob.cases {
+            println!("!!!{:?}", cas);
+            index += 1;
+            let res = one_test(cas, &run_path, &mut judge.cases[index], &prob.r#type);
+            match res {
+                Ok(result) => {
+                    if result.result == "Accepted".to_string() {
+                        judge.score += cas.score;
+                    } else {
+                        if judge.result == "Waiting".to_string() {
+                            judge.result = result.result.clone();
+                        }
+                    }
+                },
+                Err(error) => return Err(error),
+            }
         }
     }
+
+    println!("{:?}", judge);
+
     let now = Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     judge.updated_time = now.clone();
     if judge.result == "Waiting".to_string() {
@@ -251,7 +278,6 @@ async fn get_jobs(info: web::Query<AskJob>, config: web::Data<Config>) -> impl R
     let mut res: Vec<Judge> = vec![];
     let mut lock = JUDGE.lock().unwrap();
     let mut users = USER.lock().unwrap();
-    //println!("{:?} {:?} {:?} {:?} {:?} ", info.user_id, info.user_name, info.contest_id, info.problem_id, info.language);
     for i in 0..lock.len() {
         let judge = &lock[i];
         let mut ff = true;
@@ -467,14 +493,12 @@ async fn ranklist(index: web::Path<usize>, info: web::Query<Rule>, config: web::
                 ret[id].scores[lock[i].submission.problem_id as usize] = lock[i].score
             },
             ScoringRule::highest => {
-                println!("X{} {} {} {}", id, lock[i].submission.problem_id, lock[i].score, ret[id].scores[lock[i].submission.problem_id as usize]);
                 if has_submitted[id][lock[i].submission.problem_id as usize] == false || lock[i].score > ret[id].scores[lock[i].submission.problem_id as usize] {
                     let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
                     vec[id].time = time;
                     ret[id].scores[lock[i].submission.problem_id as usize] = lock[i].score;
                     has_submitted[id][lock[i].submission.problem_id as usize] = true;
                 }
-                println!("Y{} {} {} {}", id, lock[i].submission.problem_id, lock[i].score, ret[id].scores[lock[i].submission.problem_id as usize]);
             },
         }
     }
@@ -489,10 +513,6 @@ async fn ranklist(index: web::Path<usize>, info: web::Query<Rule>, config: web::
 
     for i in 0..users.len() {
         println!("{}:{}", i, vec[i].score);
-    }
-    if users.len() == 3 {
-        println!("Ranklist!{:?} -- {:?} --  {:?}", vec[0].time, vec[1].time, vec[2].time);
-        println!("{:?} {:?} {:?} ", vec[0].cmp(&vec[1], &info.tie_breaker), vec[0].cmp(&vec[2], &info.tie_breaker), vec[1].cmp(&vec[2], &info.tie_breaker));
     }
     vec.sort_by(|x, y| x.cmp(y, &info.tie_breaker));
 
@@ -511,6 +531,18 @@ async fn ranklist(index: web::Path<usize>, info: web::Query<Rule>, config: web::
     gene_ret(Ok(result))
 }
 
+//Arguments
+#[derive(Debug, StructOpt)]
+#[structopt(name = "example", about = "An example of StructOpt usage.")]
+struct Opt {
+    //Set config
+    #[structopt(short = "c", long = "config", default_value = "")]
+    config: String,
+
+    //Set flush
+    #[structopt(short = "f", long = "flush-data")]
+    flush: bool,
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
