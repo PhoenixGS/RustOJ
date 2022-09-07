@@ -15,7 +15,7 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use chrono::{Local, DateTime, FixedOffset, NaiveDate, prelude::*, offset::LocalResult};
-pub use structs::{config_structs::*, judge_structs::*};
+pub use structs::{config_structs::*, judge_structs::*, Errors};
 
 //Arguments
 #[derive(Debug, StructOpt)]
@@ -75,56 +75,6 @@ struct User {
 lazy_static! {
     static ref JUDGE: Arc<Mutex<Vec<Judge>>> = Arc::new(Mutex::new(Vec::new()));
     static ref USER: Arc<Mutex<Vec<User>>> = Arc::new(Mutex::new(Vec::new()));
-}
-
-enum Errors {
-    ErrInvalidArgument,
-    ErrInvalidState,
-    ErrNotFound,
-    ErrRateLimit,
-    ErrExternal,
-    ErrInternal,
-}
-
-impl std::convert::From<std::io::Error> for Errors {
-    fn from(err: std::io::Error) -> Self {
-        Self::ErrInternal
-    }
-}
-
-impl Errors {
-    fn to_u16(&self) -> u16 {
-        match self {
-            Errors::ErrInvalidArgument => return 400,
-            Errors::ErrInvalidState => return 400,
-            Errors::ErrNotFound => return 404,
-            Errors::ErrRateLimit => return 400,
-            Errors::ErrExternal => return 500,
-            Errors::ErrInternal => return 500,
-        }
-    }
-
-    fn to_code(&self) -> u64 {
-        match self {
-            Errors::ErrInvalidArgument => return 1,
-            Errors::ErrInvalidState => return 2,
-            Errors::ErrNotFound => 3,
-            Errors::ErrRateLimit => 4,
-            Errors::ErrExternal => 5,
-            Errors::ErrInternal => 6,
-        }
-    }
-
-    fn to_string(&self) -> String {
-        match self {
-            Errors::ErrInvalidArgument => return "ERR_INVALID_ARGUMENT".to_string(),
-            Errors::ErrInvalidState => return "ERR_INVALID_STATE".to_string(),
-            Errors::ErrNotFound => return "ERR_NOT_FOUND".to_string(),
-            Errors::ErrRateLimit => return "ERR_RATE_LIMIT".to_string(),
-            Errors::ErrExternal => return "ERR_EXTERNAL".to_string(),
-            Errors::ErrInternal => return "ERR_INTERNAL".to_string(),
-        }
-    }
 }
 
 fn gene_ret(res: Result<impl Serialize + std::fmt::Debug, Errors>) -> HttpResponse {

@@ -79,3 +79,53 @@ pub mod judge_structs {
         pub cases: Vec<CaseResult>,
     }
 }
+
+pub enum Errors {
+    ErrInvalidArgument,
+    ErrInvalidState,
+    ErrNotFound,
+    ErrRateLimit,
+    ErrExternal,
+    ErrInternal,
+}
+
+impl std::convert::From<std::io::Error> for Errors {
+    fn from(err: std::io::Error) -> Self {
+        Self::ErrInternal
+    }
+}
+
+impl Errors {
+    pub fn to_u16(&self) -> u16 {
+        match self {
+            Errors::ErrInvalidArgument => return 400,
+            Errors::ErrInvalidState => return 400,
+            Errors::ErrNotFound => return 404,
+            Errors::ErrRateLimit => return 400,
+            Errors::ErrExternal => return 500,
+            Errors::ErrInternal => return 500,
+        }
+    }
+
+    pub fn to_code(&self) -> u64 {
+        match self {
+            Errors::ErrInvalidArgument => return 1,
+            Errors::ErrInvalidState => return 2,
+            Errors::ErrNotFound => 3,
+            Errors::ErrRateLimit => 4,
+            Errors::ErrExternal => 5,
+            Errors::ErrInternal => 6,
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            Errors::ErrInvalidArgument => return "ERR_INVALID_ARGUMENT".to_string(),
+            Errors::ErrInvalidState => return "ERR_INVALID_STATE".to_string(),
+            Errors::ErrNotFound => return "ERR_NOT_FOUND".to_string(),
+            Errors::ErrRateLimit => return "ERR_RATE_LIMIT".to_string(),
+            Errors::ErrExternal => return "ERR_EXTERNAL".to_string(),
+            Errors::ErrInternal => return "ERR_INTERNAL".to_string(),
+        }
+    }
+}
