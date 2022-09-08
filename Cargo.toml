@@ -5,6 +5,14 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[[bin]]
+name = "oj"
+path = "src/main.rs"
+
+[[bin]]
+name = "client"
+path = "src/client.rs"
+
 [dependencies]
 actix-web = "4.1.0"
 env_logger = "0.9.0"
@@ -16,6 +24,8 @@ rand = "0.8.5"
 wait-timeout = "0.1.5"
 lazy_static = "1.4.0"
 chrono = "0.4"
+text_io = "0.1.12"
+reqwest = { version = "0.11", features = ["json", "blocking"] }
 
 [dev-dependencies]
 assert-json-diff = "2.0.2"
