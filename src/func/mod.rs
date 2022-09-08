@@ -69,7 +69,7 @@ pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &Stri
         }
     };
     let running_time = instant.elapsed();
-    res.time = running_time.as_millis();
+    res.time = running_time.as_millis() as u64;
     println!("TIME1!!!! {:?}", res.time);
 
     if running_time.as_micros() > case.time_limit as u128 {

@@ -15,6 +15,7 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use lazy_static::lazy_static;
 use chrono::{Local, DateTime, FixedOffset, NaiveDate, prelude::*, offset::LocalResult};
+use serde_json::json;
 pub use structs::{config_structs::*, judge_structs::*, user_structs::*, contest_structs::*, Errors};
 pub use func::{gene_ret, get_tmpdir, one_test};
 
@@ -41,6 +42,49 @@ lazy_static! {
     static ref CONTEST: Arc<Mutex<Vec<Contest>>> = Arc::new(Mutex::new(Vec::new()));
 }
 
+fn load_json() {
+    let text = fs::read_to_string("./save.json");
+
+    match text {
+        Ok(json) => {
+            let save: Save = serde_json::from_str(json.as_str()).unwrap();
+            let mut judges = JUDGE.lock().unwrap();
+            let mut users = USER.lock().unwrap();
+            let mut contests = CONTEST.lock().unwrap();
+            for judge in save.judges {
+                judges.push(judge);
+            }
+            for user in save.users {
+                users.push(user);
+            }
+            for contest in save.contests {
+                contests.push(contest);
+            }
+        },
+        Err(error) => (),
+    }
+}
+
+fn save_json() {
+    println!("BEGIN");
+    let mut save = Save{judges: vec![], users: vec![], contests: vec![]};
+    let mut judges = JUDGE.lock().unwrap();
+    let mut users = USER.lock().unwrap();
+    let mut contests = CONTEST.lock().unwrap();
+    println!("END");
+    for i in 0..judges.len() {
+        save.judges.push(judges[i].clone());
+    }
+    for i in 1..users.len() {
+        save.users.push(users[i].clone());
+    }
+    for i in 1..contests.len() {
+        save.contests.push(contests[i].clone());
+    }
+    fs::write("./save.json", json!(save).to_string()).unwrap();
+}
+
+//Judge a submission
 fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
     let mut lock = JUDGE.lock().unwrap();
     if id >= lock.len() {
@@ -102,7 +146,7 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
     let mut file = File::create(code_path.as_str()).unwrap();
     file.write(judge.submission.source_code.as_bytes()).unwrap();
 
-    //compile
+    //Compile
     let mut com: String = "".to_string();
     let mut comm: Vec<String> = vec![];
     for st in &lang.command {
@@ -216,7 +260,9 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
 async fn post_jobs(body: web::Json<Submission>, config: web::Data<Config>) -> impl Responder {
     log::info!("post_jobs");
 
+    println!("___");
     let mut lock = JUDGE.lock().unwrap();
+    println!("+++");
 
     let now = Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
 
@@ -283,6 +329,7 @@ async fn post_jobs(body: web::Json<Submission>, config: web::Data<Config>) -> im
         if count >= contests[body.contest_id as usize].submission_limit {
             return gene_ret(Err::<Judge, Errors>(Errors::ErrRateLimit));
         }
+        drop(contests);
     }
 
     //Check problem
@@ -305,6 +352,7 @@ async fn post_jobs(body: web::Json<Submission>, config: web::Data<Config>) -> im
 
     //let res = judge(&body, lang.as_ref().unwrap(), prob.as_ref().unwrap());
     let res = judging(id, &config);
+    save_json();
     gene_ret(res)
 }
 
@@ -399,6 +447,7 @@ async fn get_jobs_id(index: web::Path<usize>, config: web::Data<Config>) -> impl
 async fn put_jobs_id(index: web::Path<usize>, config: web::Data<Config>) -> impl Responder {
     let id = *index;
     let res = judging(id, &config);
+    save_json();
     gene_ret(res)
 }
 
@@ -423,6 +472,8 @@ async fn post_users(body: web::Json<AddUser>, config: web::Data<Config>) -> impl
         }
         let user = User{id: users.len() as u64, name: body.name.clone()};
         users.push(user.clone());
+        drop(users);
+        save_json();
         gene_ret(Ok(user))
     } else {
         let mut ff = true;
@@ -439,7 +490,10 @@ async fn post_users(body: web::Json<AddUser>, config: web::Data<Config>) -> impl
             return gene_ret(Err::<User, Errors>(Errors::ErrInvalidArgument));
         }
         users[body.id.unwrap() as usize].name = body.name.clone();
-        gene_ret(Ok(users[body.id.unwrap() as usize].clone()))
+        let user = users[body.id.unwrap() as usize].clone();
+        drop(users);
+        save_json();
+        gene_ret(Ok(user))
     }
 }
 
@@ -480,6 +534,9 @@ async fn post_contests(mut body: web::Json<Contest>, config: web::Data<Config>) 
                 return gene_ret(Err::<Contest, Errors>(Errors::ErrNotFound));
             }
             contests[id as usize] = body.clone();
+            drop(contests);
+            drop(users);
+            save_json();
             return gene_ret(Ok(body.clone()));
         },
         None => {
@@ -495,6 +552,9 @@ async fn post_contests(mut body: web::Json<Contest>, config: web::Data<Config>) 
             }
             body.id = Some(contests.len() as u64);
             contests.push(body.clone());
+            drop(contests);
+            drop(users);
+            save_json();
             return gene_ret(Ok(body.clone()));
         },
     }
@@ -603,7 +663,7 @@ async fn ranklist(contest_id: web::Path<usize>, info: web::Query<Rule>, config: 
     }
     let mut fast = vec![];
     for i in 0..contest.problem_ids.len() {
-        fast.push(vec![u128::MAX; config.problems[config.to_index(contest.problem_ids[i]).unwrap()].cases.len()]);
+        fast.push(vec![u64::MAX; config.problems[config.to_index(contest.problem_ids[i]).unwrap()].cases.len()]);
     }
     for i in 0..lock.len() {
         if lock[i].submission.contest_id as usize == *contest_id {
@@ -715,6 +775,13 @@ struct Opt {
     flush: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct Save {
+    judges: Vec<Judge>,
+    users: Vec<User>,
+    contests: Vec<Contest>,
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let opt = Opt::from_args();
@@ -751,6 +818,16 @@ async fn main() -> std::io::Result<()> {
         contests[0].problem_ids.push(config.problems[i].id);
     }
     drop(contests);
+
+    println!("flush? {}", opt.flush);
+    if opt.flush == false {
+        load_json();
+    } else {
+        let res = Command::new("rm")
+                .arg("save.json")
+                .output();
+    }
+    println!("???");
 
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 

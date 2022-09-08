@@ -86,7 +86,7 @@ pub mod judge_structs {
     pub struct CaseResult {
         pub id: u64,
         pub result: String,
-        pub time: u128,
+        pub time: u64,
         pub memory: u64,
         pub info: String,
     }
