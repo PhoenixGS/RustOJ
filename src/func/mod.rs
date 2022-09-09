@@ -12,6 +12,7 @@ pub fn gene_ret(res: Result<impl Serialize + std::fmt::Debug, Errors>) -> HttpRe
     struct Error {
         reason: String,
         code: u64,
+        message: String,
     }
 
     match res {
@@ -21,7 +22,7 @@ pub fn gene_ret(res: Result<impl Serialize + std::fmt::Debug, Errors>) -> HttpRe
         },
         Err(Er) => {
             println!("Result: Err {}", Er.to_string());
-            HttpResponse::BadRequest().status(StatusCode::from_u16(Er.to_u16()).unwrap()).json(Error{reason: Er.to_string(), code: Er.to_code()})
+            HttpResponse::BadRequest().status(StatusCode::from_u16(Er.to_u16()).unwrap()).json(Error{reason: Er.to_string(), code: Er.to_code(), message: "".to_string()})
         }
     }
     //todo: message

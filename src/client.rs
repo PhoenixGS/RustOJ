@@ -41,15 +41,21 @@ fn query(contest_id: u64) -> Result<Vec<Ret>, reqwest::Error> {
         .ok();
     let res = response.unwrap().json::<Vec<Ret>>()?;
     print!("\x1B[2J\x1B[1;1H");
-    print!("Rank | User ID |");
+    let mut maxlen = 7;
+    for i in 0..res.len() {
+        if res[i].user.name.len() > maxlen {
+            maxlen = res[i].user.name.len();
+        }
+    }
+    print!("Rank | {:^width$} |", "User ID", width = maxlen + 2);
     for i in 0..res[0].scores.len() {
         print!(" Problem {:>10} |", i);
     }
     println!("");
     for i in 0..res.len() {
-        print!("{:<4} | {:>7} |", res[i].rank, res[i].user.name);
+        print!("{:^4} | {:^width$} |", res[i].rank, res[i].user.name, width = maxlen + 2);
         for j in 0..res[i].scores.len() {
-            print!(" {:>18} |", res[i].scores[j]);
+            print!(" {:^18} |", res[i].scores[j]);
         }
         println!("");
     }
@@ -58,7 +64,11 @@ fn query(contest_id: u64) -> Result<Vec<Ret>, reqwest::Error> {
 }
 
 fn print(judge: Judge) {
-
+    println!("Result: {}", judge.result);
+    println!("Score: {}", judge.score);
+    for case in judge.cases {
+        println!("Case {}: {}", case.id, case.result);
+    }
 }
 
 fn main() {
