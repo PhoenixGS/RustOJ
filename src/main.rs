@@ -248,6 +248,11 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
         judge.result = "Accepted".to_string();
     }
     judge.state = "Finished".to_string();
+
+    if prob.misc.dynamic_ranking_ratio.is_some() {
+        judge.score = (1.0 - prob.misc.dynamic_ranking_ratio.as_ref().unwrap()) * judge.score;
+    }
+
     println!("{:?}", judge);
     Command::new("rm")
             .arg("-rf")
@@ -670,21 +675,51 @@ async fn ranklist(contest_id: web::Path<usize>, info: web::Query<Rule>, config: 
             let id = lock[i].submission.user_id as usize;
             //let index = config.to_index(lock[i].submission.problem_id).unwrap();
             let index = contest.to_index(lock[i].submission.problem_id).unwrap();
+            let prob = &config.problems[config.to_index(lock[i].submission.problem_id).unwrap()];
             println!("!!{}", index);
             vec[id].count += 1;
-            match &rule {
-                ScoringRule::latest => {
-                    let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
-                    vec[id].time = time;
-                    ret[id].scores[index] = lock[i].score;
-                    has_submitted[id][index] = Some(i);
-                },
-                ScoringRule::highest => {
-                    if has_submitted[id][index].is_none() || lock[i].score > ret[id].scores[index] {
+            match &prob.misc.dynamic_ranking_ratio {
+                Some(rate) => {
+                    if ret[id].scores[index] == (1.0 - rate) * prob.score_sum() {
                         let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
                         vec[id].time = time;
                         ret[id].scores[index] = lock[i].score;
                         has_submitted[id][index] = Some(i);
+                    } else {
+                        match &rule {
+                            ScoringRule::latest => {
+                                let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
+                                vec[id].time = time;
+                                ret[id].scores[index] = lock[i].score;
+                                has_submitted[id][index] = Some(i);
+                            },
+                            ScoringRule::highest => {
+                                if has_submitted[id][index].is_none() || lock[i].score > ret[id].scores[index] {
+                                    let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
+                                    vec[id].time = time;
+                                    ret[id].scores[index] = lock[i].score;
+                                    has_submitted[id][index] = Some(i);
+                                }
+                            },
+                        }
+                    }
+                },
+                None => {
+                    match &rule {
+                        ScoringRule::latest => {
+                            let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
+                            vec[id].time = time;
+                            ret[id].scores[index] = lock[i].score;
+                            has_submitted[id][index] = Some(i);
+                        },
+                        ScoringRule::highest => {
+                            if has_submitted[id][index].is_none() || lock[i].score > ret[id].scores[index] {
+                                let time = Local.datetime_from_str(lock[i].created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap();
+                                vec[id].time = time;
+                                ret[id].scores[index] = lock[i].score;
+                                has_submitted[id][index] = Some(i);
+                            }
+                        },
                     }
                 },
             }
@@ -695,13 +730,18 @@ async fn ranklist(contest_id: web::Path<usize>, info: web::Query<Rule>, config: 
         for problem_id in &contest.problem_ids {
             let index = contest.to_index(*problem_id).unwrap();
             let prob = &config.problems[config.to_index(*problem_id).unwrap()];
-            if ret[*user_id as usize].scores[index] == prob.score_sum() {
-                let judge_id = has_submitted[*user_id as usize][index].unwrap();
-                for case_id in 0..prob.cases.len() {
-                    if fast[index][case_id] > lock[judge_id].cases[case_id + 1].time {
-                        fast[index][case_id] = lock[judge_id].cases[case_id + 1].time;
+            match prob.misc.dynamic_ranking_ratio {
+                Some(rate) => {
+                    if ret[*user_id as usize].scores[index] == (1.0 - rate) * prob.score_sum() {
+                        let judge_id = has_submitted[*user_id as usize][index].unwrap();
+                        for case_id in 0..prob.cases.len() {
+                            if fast[index][case_id] > lock[judge_id].cases[case_id + 1].time {
+                                fast[index][case_id] = lock[judge_id].cases[case_id + 1].time;
+                            }
+                        }
                     }
-                }
+                },
+                None => (),
             }
         }
     }
@@ -718,12 +758,12 @@ async fn ranklist(contest_id: web::Path<usize>, info: web::Query<Rule>, config: 
                 Some(rate) => {
                     println!("Rate!!!{}", rate);
                     let ori_score = ret[*user_id as usize].scores[index];
-                    ret[*user_id as usize].scores[index] = (1.0 - rate) * ori_score;
-                    if ori_score == prob.score_sum() {
+                    //ret[*user_id as usize].scores[index] = (1.0 - rate) * ori_score;
+                    if ori_score == (1.0 - rate) * prob.score_sum() {
                         let judge_id = has_submitted[*user_id as usize][index].unwrap();
                         for case_id in 0..prob.cases.len() {
                             println!("Time {} {}", fast[index][case_id], lock[judge_id].cases[case_id + 1].time);
-                            ret[*user_id as usize].scores[index] += rate * ori_score * fast[index][case_id] as f64 / lock[judge_id].cases[case_id + 1].time as f64;
+                            ret[*user_id as usize].scores[index] += rate * prob.score_sum() * fast[index][case_id] as f64 / lock[judge_id].cases[case_id + 1].time as f64;
                         }
                     }
                     vec[*user_id as usize].score += ret[*user_id as usize].scores[index];
