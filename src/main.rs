@@ -207,7 +207,13 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
                                     }
                                 }
                             },
-                            Err(error) => return Err(error),
+                            Err(error) => {
+                                Command::new("rm")
+                                        .arg("-rf")
+                                        .arg(TMPDIR.as_str())
+                                        .output()?;
+                                return Err(error)
+                            },
                         }
                         println!("{:?}", res);
 
@@ -235,7 +241,13 @@ fn judging(id: usize, config: &web::Data<Config>) -> Result<Judge, Errors> {
                         }
                     }
                 },
-                Err(error) => return Err(error),
+                Err(error) => {
+                    Command::new("rm")
+                            .arg("-rf")
+                            .arg(TMPDIR.as_str())
+                            .output()?;
+                    return Err(error)
+                },
             }
         }
     }
@@ -464,8 +476,12 @@ async fn get_jobs(info: web::Query<AskJob>, config: web::Data<Config>) -> impl R
 }
 
 #[get("/jobs/{index}")]
-async fn get_jobs_id(index: web::Path<usize>, config: web::Data<Config>) -> impl Responder {
-    let id = *index;
+async fn get_jobs_id(index: web::Path<String>, config: web::Data<Config>) -> impl Responder {
+    let mut id;
+    match index.parse::<usize>() {
+        Ok(key) => id = key,
+        Err(err) => return gene_ret(Err::<Judge, Errors>(Errors::from(err))),
+    }
     let lock = JUDGE.lock().unwrap();
     let mut res: Result<Judge, Errors>;
     if id >= lock.len() {
@@ -477,11 +493,15 @@ async fn get_jobs_id(index: web::Path<usize>, config: web::Data<Config>) -> impl
 }
 
 #[put("/jobs/{index}")]
-async fn put_jobs_id(index: web::Path<usize>, config: web::Data<Config>) -> impl Responder {
-    let id = *index;
+async fn put_jobs_id(index: web::Path<String>, config: web::Data<Config>) -> impl Responder {
+    let mut id;
+    match index.parse::<usize>() {
+        Ok(key) => id = key,
+        Err(err) => return gene_ret(Err::<Judge, Errors>(Errors::from(err))),
+    }
     let lock = JUDGE.lock().unwrap();
     let mut res: Result<Judge, Errors>;
-    if *index >= lock.len() {
+    if id >= lock.len() {
         drop(lock);
         res = Err(Errors::ErrNotFound);
     } else {
@@ -618,16 +638,21 @@ async fn get_contests(config: web::Data<Config>) -> impl Responder {
 }
 
 #[get("/contests/{index}")]
-async fn get_contests_id(index: web::Path<usize>, info: web::Query<Rule>, config: web::Data<Config>) -> impl Responder {
+async fn get_contests_id(index: web::Path<String>, info: web::Query<Rule>, config: web::Data<Config>) -> impl Responder {
+    let mut id;
+    match index.parse::<usize>() {
+        Ok(key) => id = key,
+        Err(err) => return gene_ret(Err::<Judge, Errors>(Errors::from(err))),
+    }
     let mut contests = CONTEST.lock().unwrap();
-    if *index == 0 || *index >= contests.len() {
+    if id == 0 || id >= contests.len() {
         return gene_ret(Err::<Contest, Errors>(Errors::ErrNotFound));
     }
-    gene_ret(Ok(contests[*index].clone()))
+    gene_ret(Ok(contests[id].clone()))
 }
 
-#[get("/contests/{contest_id}/ranklist")]
-async fn ranklist(contest_id: web::Path<usize>, info: web::Query<Rule>, config: web::Data<Config>) -> impl Responder {
+#[get("/contests/{index}/ranklist")]
+async fn ranklist(index: web::Path<String>, info: web::Query<Rule>, config: web::Data<Config>) -> impl Responder {
     #[derive(Clone, Debug)]
     struct Rec {
         id: u64,
@@ -674,21 +699,27 @@ async fn ranklist(contest_id: web::Path<usize>, info: web::Query<Rule>, config: 
         None => rule = ScoringRule::latest,
     }
 
+    let mut contest_id;
+    match index.parse::<usize>() {
+        Ok(key) => contest_id = key,
+        Err(err) => return gene_ret(Err::<Judge, Errors>(Errors::from(err))),
+    }
+
     let mut contests = CONTEST.lock().unwrap();
     let mut users = USER.lock().unwrap();
-    if *contest_id >= contests.len() {
+    if contest_id >= contests.len() {
         return gene_ret(Err::<Vec<Ret>, Errors>(Errors::ErrNotFound));
     }
     println!("???");
-    if *contest_id == 0 {
-        contests[*contest_id].user_ids = vec![];
+    if contest_id == 0 {
+        contests[contest_id].user_ids = vec![];
         for i in 0..users.len() {
             println!("***{}", i);
-            contests[*contest_id].user_ids.push(i as u64);
+            contests[contest_id].user_ids.push(i as u64);
         }
     }
 
-    let contest = &contests[*contest_id];
+    let contest = &contests[contest_id];
 
     let mut vec:Vec<Rec> = vec![];
     for i in 0..users.len() {
@@ -713,7 +744,7 @@ async fn ranklist(contest_id: web::Path<usize>, info: web::Query<Rule>, config: 
         fast.push(vec![u64::MAX; config.problems[config.to_index(contest.problem_ids[i]).unwrap()].cases.len()]);
     }
     for i in 0..lock.len() {
-        if lock[i].submission.contest_id as usize == *contest_id {
+        if lock[i].submission.contest_id as usize == contest_id {
             let id = lock[i].submission.user_id as usize;
             //let index = config.to_index(lock[i].submission.problem_id).unwrap();
             let index = contest.to_index(lock[i].submission.problem_id).unwrap();
@@ -789,7 +820,7 @@ async fn ranklist(contest_id: web::Path<usize>, info: web::Query<Rule>, config: 
     }
 
     println!("{:?}", ret);
-    println!("{} {:?}", *contest_id, contest);
+    println!("{} {:?}", contest_id, contest);
 
     for user_id in &contest.user_ids {
         for problem_id in &contest.problem_ids {
@@ -816,7 +847,7 @@ async fn ranklist(contest_id: web::Path<usize>, info: web::Query<Rule>, config: 
     }
 
     let mut valid = vec![];
-    if *contest_id == 0 {
+    if contest_id == 0 {
         for i in 0..users.len() {
             valid.push(vec[i].clone());
         }
