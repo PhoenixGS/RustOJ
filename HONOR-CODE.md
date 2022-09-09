@@ -15,3 +15,21 @@
 ## lazy_static!
 
 [http://abboke.com/jsh/2019/0729/102511.html](http://abboke.com/jsh/2019/0729/102511.html)
+
+## 时间相关
+
+[http://www.manongjc.com/detail/28-gobblyvvuewfksw.html](http://www.manongjc.com/detail/28-gobblyvvuewfksw.html)
+
+## 数据库相关
+
+[https://www.jb51.net/article/235421.htm](https://www.jb51.net/article/235421.htm)
+
+## 前端
+
+参考了`./tests/common.rs`
+
+### 输出
+
+[https://blog.csdn.net/qq_35435999/article/details/125517644](https://blog.csdn.net/qq_35435999/article/details/125517644)
+
+[https://qa.1r1g.com/sf/ask/2438590801/](https://qa.1r1g.com/sf/ask/2438590801/)
