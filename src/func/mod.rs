@@ -58,7 +58,7 @@ pub fn one_test(case: &Case, run_path: &String, res: &mut CaseResult, typ: &Stri
     }
     let instant = Instant::now();
     let time_limit = Duration::from_micros(case.time_limit);
-    let status_code = match child.wait_timeout(time_limit).unwrap() {
+    let status_code = match child.wait_timeout(time_limit + Duration::from_micros(500)).unwrap() {
         Some(status) => {
             //println!("Status {} {}", status.success(), status.code().unwrap());
             status.code()
