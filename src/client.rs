@@ -23,8 +23,8 @@ fn submit(req: Submission) -> Result<Judge, reqwest::Error> {
         .send()
         .ok();
     let res = response.unwrap().json::<Judge>()?;
-    print!("\x1B[2J\x1B[1;1H");
-    println!("{:?}", res);
+//    print!("\x1B[2J\x1B[1;1H");
+//    println!("{:?}", res);
     Ok(res)
 }
 
@@ -43,18 +43,22 @@ fn query(contest_id: u64) -> Result<Vec<Ret>, reqwest::Error> {
     print!("\x1B[2J\x1B[1;1H");
     print!("Rank | User ID |");
     for i in 0..res[0].scores.len() {
-        print!(" Problem {:>4} |", i);
+        print!(" Problem {:>10} |", i);
     }
     println!("");
     for i in 0..res.len() {
         print!("{:<4} | {:>7} |", res[i].rank, res[i].user.name);
         for j in 0..res[i].scores.len() {
-            print!(" {:>12} |", res[i].scores[j]);
+            print!(" {:>18} |", res[i].scores[j]);
         }
         println!("");
     }
 
     Ok(res)
+}
+
+fn print(judge: Judge) {
+
 }
 
 fn main() {
@@ -80,7 +84,29 @@ fn main() {
                 println!("{:?}", req);
                 print!("\x1B[2J\x1B[1;1H");
                 println!("Waiting...");
-                submit(req);
+                let res = submit(req);
+                print!("\x1B[2J\x1B[1;1H");
+                match res {
+                    Ok(judge) => print(judge),
+                    Err(err) => println!("Error: {:?}", err),
+                }
+            },
+            2 => {
+                print!("\x1B[2J\x1B[1;1H");
+                print!("Please input json path: ");
+                let json_path: String = read!();
+                let st = fs::read_to_string(json_path).unwrap();
+                let json: Vec<Submission> = serde_json::from_str(st.as_str()).unwrap();
+                let mut results = vec![];
+                for submission in json {
+                    let res = submit(submission);
+                    match res {
+                        Ok(result) => results.push(result),
+                        Err(err) => (),
+                    }
+                }
+                fs::write("result.json", json!(results).to_string()).unwrap();
+                println!("Please open result.json to get the result.");
             },
             3 => {
                 print!("\x1B[2J\x1B[1;1H");
@@ -89,7 +115,7 @@ fn main() {
                 print!("\x1B[2J\x1B[1;1H");
                 println!("Waiting...");
                 query(contest_id);
-            }
+            },
             4 => return,
             _ => (),
         }
