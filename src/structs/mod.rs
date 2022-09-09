@@ -1,3 +1,6 @@
+use std::num::ParseIntError;
+use std::error::Error;
+
 pub mod config_structs {
     use serde::{Serialize, Deserialize};
 
@@ -153,6 +156,18 @@ pub enum Errors {
 impl std::convert::From<std::io::Error> for Errors {
     fn from(err: std::io::Error) -> Self {
         Self::ErrInternal
+    }
+}
+
+impl std::convert::From<ParseIntError> for Errors {
+    fn from(err: ParseIntError) -> Self {
+        Self::ErrInvalidArgument
+    }
+}
+
+impl std::convert::From<chrono::ParseError> for Errors {
+    fn from(err: chrono::ParseError) -> Self {
+        Self::ErrInvalidArgument
     }
 }
 

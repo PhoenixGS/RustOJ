@@ -363,10 +363,10 @@ async fn post_jobs(body: web::Json<Submission>, config: web::Data<Config>) -> im
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct AskJob {
-    user_id: Option<u64>,
+    user_id: Option<String>,
     user_name: Option<String>,
-    contest_id: Option<u64>,
-    problem_id: Option<u64>,
+    contest_id: Option<String>,
+    problem_id: Option<String>,
     language: Option<String>,
     from: Option<String>,
     to: Option<String>,
@@ -374,16 +374,38 @@ struct AskJob {
     result: Option<String>,
 }
 
-#[get("/jobs")]
-async fn get_jobs(info: web::Query<AskJob>, config: web::Data<Config>) -> impl Responder {
+fn ask(info: &AskJob, config: &Config) -> Result<Vec<Judge>, Errors> {
     let mut res: Vec<Judge> = vec![];
+    
+    //Check Arguments
+    let mut user_id = None;
+    let mut contest_id = None;
+    let mut problem_id = None;
+    let mut from = None;
+    let mut to = None;
+    if info.user_id.is_some() {
+        user_id = Some(info.user_id.as_ref().unwrap().parse::<u64>()?);
+    }
+    if info.contest_id.is_some() {
+        contest_id = Some(info.contest_id.as_ref().unwrap().parse::<u64>()?);
+    }
+    if info.problem_id.is_some() {
+        problem_id = Some(info.problem_id.as_ref().unwrap().parse::<u64>()?);
+    }
+    if info.from.is_some() {
+        from = Some(Local.datetime_from_str(info.from.as_ref().unwrap().as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ")?);
+    }
+    if info.to.is_some() {
+        to = Some(Local.datetime_from_str(info.to.as_ref().unwrap().as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ")?);
+    }
+    
     let mut lock = JUDGE.lock().unwrap();
     let mut users = USER.lock().unwrap();
     for i in 0..lock.len() {
         let judge = &lock[i];
         let mut ff = true;
         if info.user_id.is_some() {
-            if judge.submission.user_id != info.user_id.unwrap() {
+            if judge.submission.user_id != user_id.unwrap() {
                 ff = false;
             }
         }
@@ -393,12 +415,12 @@ async fn get_jobs(info: web::Query<AskJob>, config: web::Data<Config>) -> impl R
             }
         }
         if info.contest_id.is_some() {
-            if judge.submission.contest_id != info.contest_id.unwrap() {
+            if judge.submission.contest_id != contest_id.unwrap() {
                 ff = false;
             }
         }
         if info.problem_id.is_some() {
-            if judge.submission.problem_id != info.problem_id.unwrap() {
+            if judge.submission.problem_id != problem_id.unwrap() {
                 ff = false;
             }
         }
@@ -408,12 +430,12 @@ async fn get_jobs(info: web::Query<AskJob>, config: web::Data<Config>) -> impl R
             }
         }
         if info.from.is_some() {
-            if Local.datetime_from_str(judge.created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() < Local.datetime_from_str(info.from.as_ref().unwrap().as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() {
+            if Local.datetime_from_str(judge.created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() < from.unwrap() {
                 ff = false;
             }
         }
         if info.to.is_some() {
-            if Local.datetime_from_str(judge.created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() > Local.datetime_from_str(info.to.as_ref().unwrap().as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() {
+            if Local.datetime_from_str(judge.created_time.as_str(), "%Y-%m-%dT%H:%M:%S%.3fZ").unwrap() > to.unwrap() {
                 ff = false;
             }
         }
@@ -432,7 +454,13 @@ async fn get_jobs(info: web::Query<AskJob>, config: web::Data<Config>) -> impl R
         }
     }
     println!("GET result: {:?}", res);
-    HttpResponse::Ok().json(res)
+    Ok(res)
+}
+
+#[get("/jobs")]
+async fn get_jobs(info: web::Query<AskJob>, config: web::Data<Config>) -> impl Responder {
+    let result = ask(&info, &config);
+    gene_ret(result)
 }
 
 #[get("/jobs/{index}")]
@@ -451,14 +479,22 @@ async fn get_jobs_id(index: web::Path<usize>, config: web::Data<Config>) -> impl
 #[put("/jobs/{index}")]
 async fn put_jobs_id(index: web::Path<usize>, config: web::Data<Config>) -> impl Responder {
     let id = *index;
-    let res = judging(id, &config);
+    let lock = JUDGE.lock().unwrap();
+    let mut res: Result<Judge, Errors>;
+    if *index >= lock.len() {
+        drop(lock);
+        res = Err(Errors::ErrNotFound);
+    } else {
+        drop(lock);
+        res = judging(id, &config);
+    }
     save_json();
     gene_ret(res)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct AddUser {
-    id: Option<u64>,
+    id: Option<String>,
     name: String,
 }
 
@@ -481,6 +517,12 @@ async fn post_users(body: web::Json<AddUser>, config: web::Data<Config>) -> impl
         save_json();
         gene_ret(Ok(user))
     } else {
+        let mut id_c = body.id.as_ref().unwrap().parse::<u64>();
+        let mut id;
+        match id_c {
+            Ok(key) => id = key,
+            Err(err) => return gene_ret(Err::<User,Errors>(Errors::from(err))),
+        }
         let mut ff = true;
         for i in 0..users.len() {
             if users[i].name == body.name {
@@ -488,14 +530,14 @@ async fn post_users(body: web::Json<AddUser>, config: web::Data<Config>) -> impl
             }
         }
         //Priority
-        if body.id.unwrap() >= users.len() as u64 {
+        if id >= users.len() as u64 {
             return gene_ret(Err::<User, Errors>(Errors::ErrNotFound));
         }
         if ff == false {
             return gene_ret(Err::<User, Errors>(Errors::ErrInvalidArgument));
         }
-        users[body.id.unwrap() as usize].name = body.name.clone();
-        let user = users[body.id.unwrap() as usize].clone();
+        users[id as usize].name = body.name.clone();
+        let user = users[id as usize].clone();
         drop(users);
         save_json();
         gene_ret(Ok(user))
